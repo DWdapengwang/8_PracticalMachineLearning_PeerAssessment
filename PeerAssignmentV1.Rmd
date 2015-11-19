@@ -1,0 +1,113 @@
+---
+title: "Practical Machine Learning - Peer Assessment"
+author: "Dapeng Wang"
+date: "Thursday, November 19, 2015"
+output: html_document
+---
+
+## Summary
+In this project, we are using the data set supplied by http://groupware.les.inf.puc-rio.br/har. The data downloaded contain training and test set, and the purpose of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set.
+
+Random forest is the algorithm that is used, this is applied to the cleaned data, as well as cleaned data with PCA applied to see if PCA generate a better prediction or not. 
+
+
+## Loading and Data Cleaning
+```{r, cache=TRUE}
+library(caret)
+library(randomForest)
+
+#reading the files and changing the empty cells as NA
+trainData <- read.csv("pml-training.csv", na.strings=c("NA",""))
+testData <- read.csv("pml-testing.csv", na.strings=c("NA",""))
+
+training <- trainData[, colSums(is.na(trainData))<0.7*nrow(trainData)]
+testing <- testData[, colSums(is.na(trainData))<0.7*nrow(trainData)]
+
+training <- training[, -c(1:7)]
+testing <- testing[, -c(1:7)]
+```
+After loading and looking at the data, alot of the columns have empty values or is NA, so these columns are removed. Also the time stamp is removed corresponding to the first 6 columns of the table, the num_window column is also removed as it is not related to the movement. 
+
+
+## PreProcess 
+```{r, cache=TRUE}
+#Sepearte to training and cross validation set
+set.seed(2233)
+inTrain <- createDataPartition(y = training$classe, p = 0.7, list = FALSE)
+trainingSet <- training[inTrain, ]
+cvSet <- training[-inTrain, ]
+
+#Looking at the correlation to see if PCA can be applied or not
+M <- abs(cor(trainingSet[, -53]))
+diag(M) <- 0
+which(M > 0.9, arr.ind = T)
+```
+
+It can be observed that alot of the variables are highly correlated, so one approach is to use PCA to preprocess the data before doing training on it. 
+
+```{r, cache=TRUE}
+#applying PCA to training, cv and test set
+preProc <- preProcess(trainingSet[, -53], method = "pca")
+trainingPCA <- predict(preProc, trainingSet[, -53])
+trainingPCA$classe <- trainingSet$classe
+cvPCA <- predict(preProc, cvSet[, -53])
+cvPCA$classe <- cvSet$classe
+testPCA <- predict(preProc, testing)
+```
+
+The PCA have reduced the number of varaibles from 53 to 26
+```{r}
+length(trainingPCA)
+```
+Next we will apply Randon Forest to training set with PCA and without PCA, to make prediction on the test set, and also to see which one is more accurate on the cross validation set. 
+
+## Ramdom Forest on Traning set with PCA
+```{r, cache=TRUE}
+modelPCA <- train(classe ~., data = trainingPCA, method = "rf", importance = TRUE)
+modelPCA$finalModel
+predPCA <- predict(modelPCA, newdata = cvPCA)
+confusionMatrix(predPCA, cvPCA$classe)
+predictPCA <- predict(modelPCA, newdata = testPCA)
+```
+
+Random Forest applied to the training set with PCA achieved an error rate of 2.61%, and when the prediction is made on the cross validation set, the accuracy achieved is 97.45%, however here the coefficients are hard to interpert after PCA have been applied. 
+
+
+
+
+## Random Forest on training set without PCA
+```{r, cache=TRUE}
+modelNoPCA <- train(classe ~., data = trainingSet, method = "rf", importance = TRUE)
+modelNoPCA$finalModel
+predCVNoPCA <- predict(modelNoPCA, newdata = cvSet)
+confusionMatrix(predCVNoPCA, cvSet$classe)
+predict <- predict(modelNoPCA, newdata = testing)
+```
+Here random forest applied to the training set without PCA achieved an error rate of 0.71%, and when the prediction is made on the cross validation set, the accuracy achieved is 99.15%, this is better than the random forest applied to the data with PCA applied, so the prediction here is used on the testing set.  
+
+The importance of the variables is as follows
+```{r, cache=TRUE}
+varImp(modelNoPCA)
+```
+
+When looking at the prediction on the two cases, it turned out that the prediction are the same
+```{r}
+predictPCA
+predict
+predictPCA == predict
+```
+But training on the set with PCA applied took around half the time compared to training on the set with no PCA applied variables, while giving a reasonable accuracy. 
+
+
+
+## Generating Answers for Submission
+```{r}
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+pml_write_files(predict)
+```
